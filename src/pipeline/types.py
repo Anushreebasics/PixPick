@@ -9,6 +9,8 @@ class ProductRecord:
     image_path: str
     style: str
     product_title: str = ""
+    manifest_row_index: int = -1
+    manifest_status: str = ""
 
 
 @dataclass

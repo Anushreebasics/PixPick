@@ -1,0 +1,20 @@
+{
+  "product_id": "SKU-1001",
+  "category": "electronics",
+  "style": "hero",
+  "source_image": "data/input/earbuds.jpg",
+  "status": "manual_review",
+  "attempts": [
+    {
+      "attempt": 1,
+      "validation": {
+        "passed": false,
+        "score": 0.7258260298539365,
+        "failure_types": [],
+        "corrective_constraints": [],
+        "rationale": "Best quality variation from 8 variations (index: 6, checks: sharpness, contrast, dynamic_range, exposure)"
+      },
+      "prompt": "You are a product-image creative engine. Keep product identity, geometry, and key details accurate.\nApply only background, lighting, and stylistic composition updates requested by the user.\nDo not add or remove product parts, logos, labels, buttons, stitching, zippers, ports, or key textures.\nKeep realistic proportions and natural shadows.\n\n\nCategory prompt:\nCreate a premium electronics showcase image.\nUse controlled reflections, clean gradients, and crisp edge highlights.\nPreserve all buttons, ports, screens, and logo placements exactly.\n\n\nTarget style variant: hero.\nProduct title: Wireless Earbuds Black.\nOutput requirements:\n- Photorealistic quality suitable for e-commerce listing\n- Keep the product as primary focus\n- Preserve identity and structural details from source image\n"
+    }
+  ]
+}

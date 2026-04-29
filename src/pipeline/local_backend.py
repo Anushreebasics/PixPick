@@ -5,8 +5,9 @@ import os
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
+
+from .quality import assess_image_quality
 
 
 class LocalImageBackend:
@@ -47,7 +48,7 @@ class LocalImageBackend:
         source_mime_type: Optional[str] = None,
         strength: float = 0.7,
     ) -> Dict[str, Any]:
-        """Generate multiple image variations and return the best matching one.
+        """Generate multiple image variations and return the best quality one.
         
         Returns:
             {
@@ -58,12 +59,12 @@ class LocalImageBackend:
                 'scores': List[float]
             }
         """
-        source_image = Image.open(BytesIO(source_image_bytes)).convert("RGB")
-        
         variations = []
         scores = []
+        check_counts = []
+        passed_checks = []
         
-        # Generate multiple variations
+        # Generate multiple variations and rank them by perceptual quality.
         for i in range(num_variations):
             seed_value = abs(hash((prompt, i))) % (2**32)
             
@@ -75,15 +76,16 @@ class LocalImageBackend:
                 seed=seed_value,
             )
             
-            # Compare generated image to source
             generated_image = Image.open(BytesIO(generated_bytes)).convert("RGB")
-            similarity_score = self._compute_image_similarity(source_image, generated_image)
+            quality_assessment = assess_image_quality(generated_image)
             
             variations.append(generated_bytes)
-            scores.append(similarity_score)
+            scores.append(quality_assessment["score"])
+            check_counts.append(quality_assessment["check_count"])
+            passed_checks.append(quality_assessment["passed_checks"])
         
-        # Find best match
-        best_idx = scores.index(max(scores))
+        # Prefer the variation that passes the most QA checks, then highest quality score.
+        best_idx = max(range(len(variations)), key=lambda idx: (check_counts[idx], scores[idx]))
         best_score = scores[best_idx]
         best_image = variations[best_idx]
         
@@ -93,6 +95,8 @@ class LocalImageBackend:
             'variation_index': best_idx,
             'num_variations': num_variations,
             'scores': scores,
+            'check_counts': check_counts,
+            'passed_checks': passed_checks,
         }
 
     def validate_semantic_match(
@@ -103,18 +107,22 @@ class LocalImageBackend:
         generated_mime_type: str,
         required_checks: List[str],
     ) -> Dict[str, Any]:
-        """Validate by computing image similarity to source."""
+        """Validate the generated image using perceptual quality checks."""
         try:
-            source_image = Image.open(BytesIO(source_image_bytes)).convert("RGB")
             generated_image = Image.open(BytesIO(generated_image_bytes)).convert("RGB")
-            score = self._compute_image_similarity(source_image, generated_image)
+            assessment = assess_image_quality(generated_image)
+            score = assessment["score"]
+            passed_checks = assessment["passed_checks"]
             
             return {
-                "passed": score > 0.75,
+                "passed": score > 0.75 and assessment["check_count"] >= 3,
                 "score": score,
-                "failure_types": [],
+                "failure_types": [] if len(passed_checks) >= 3 else ["quality_checks_failed"],
                 "corrective_constraints": [],
-                "rationale": f"Image similarity to source: {score:.2f}",
+                "rationale": (
+                    f"Perceptual quality score: {score:.2f}; "
+                    f"passed checks: {', '.join(passed_checks) if passed_checks else 'none'}"
+                ),
             }
         except Exception:
             return {
@@ -124,31 +132,6 @@ class LocalImageBackend:
                 "corrective_constraints": [],
                 "rationale": "Failed to compare images",
             }
-
-    def _compute_image_similarity(self, img1: Image.Image, img2: Image.Image) -> float:
-        """Compute similarity between two images prioritizing structural preservation.
-        
-        Returns a score from 0.0 to 1.0 where higher means more similar to source.
-        For stylized images, this measures how well the product structure is preserved.
-        """
-        # Ensure same size
-        if img1.size != img2.size:
-            img2 = img2.resize(img1.size, Image.Resampling.LANCZOS)
-        
-        # Convert to arrays
-        arr1 = np.array(img1, dtype=np.float32)
-        arr2 = np.array(img2, dtype=np.float32)
-        
-        # Mean squared error (lower is better/more similar)
-        mse = np.mean((arr1 - arr2) ** 2)
-        
-        # Convert MSE to similarity score: 0-255 pixel range
-        # MSE = 0 → similarity = 1.0 (identical)
-        # MSE = 65025 → similarity ≈ 0 (completely different, 255^2)
-        max_mse = 255.0 ** 2
-        similarity = max(0.0, 1.0 - (mse / max_mse))
-        
-        return float(similarity)
 
     def _load_diffusion_pipeline(self):
         if self._pipeline is not None:

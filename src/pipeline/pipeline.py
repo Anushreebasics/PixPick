@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from .config import PromptConfig, Settings
-from .manifest import load_manifest
+from .manifest import load_manifest, update_manifest
 from .prompting import PromptBuilder
 from .qa import parse_validation
 from .storage import detect_mime_type, image_dimensions, save_image, write_json
@@ -23,18 +22,23 @@ class BatchPipeline:
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def run(self, limit: Optional[int] = None) -> Dict[str, int]:
-        records = load_manifest(self.settings.manifest_path)
+        records = load_manifest(self.settings.manifest_path, skip_completed=True)
         if limit is not None:
             records = records[:limit]
 
-        self.logger.info("Loaded %d records from manifest.", len(records))
+        self.logger.info(
+            "Loaded %d pending records from manifest (completed rows are skipped for resume).",
+            len(records),
+        )
 
         counters = {"passed": 0, "manual_review": 0, "errors": 0}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.settings.worker_count) as pool:
-            futures = [pool.submit(self._process_record, record) for record in records]
+            futures = {pool.submit(self._process_record, record): record for record in records}
             for future in concurrent.futures.as_completed(futures):
+                record = futures[future]
                 result = future.result()
+                update_manifest(self.settings.manifest_path, record, result)
                 counters[result] += 1
 
         self.logger.info("Pipeline finished: %s", counters)
@@ -65,13 +69,18 @@ class BatchPipeline:
             generated_bytes = result['best_image_bytes']
             best_score = result['best_score']
             variation_idx = result['variation_index']
+            best_check_count = result.get('check_counts', [0])[variation_idx]
+            best_passed_checks = result.get('passed_checks', [[]])[variation_idx]
             
             raw_validation = {
-                "passed": best_score > 0.75,
+                "passed": best_score > 0.75 and best_check_count >= 3,
                 "score": best_score,
                 "failure_types": [],
                 "corrective_constraints": [],
-                "rationale": f"Best match from {result['num_variations']} variations (index: {variation_idx})",
+                "rationale": (
+                    f"Best quality variation from {result['num_variations']} variations "
+                    f"(index: {variation_idx}, checks: {', '.join(best_passed_checks) if best_passed_checks else 'none'})"
+                ),
             }
             
             validation = parse_validation(raw_validation, self.settings.validation_score_threshold)
@@ -89,13 +98,15 @@ class BatchPipeline:
                     'variations_count': result['num_variations'],
                     'best_variation_index': variation_idx,
                     'all_scores': result['scores'],
+                    'all_check_counts': result.get('check_counts', []),
                 })
                 self.logger.info(
-                    "PASS product=%s variations=%d best_score=%.2f best_idx=%d",
+                    "PASS product=%s variations=%d quality_score=%.2f best_idx=%d checks=%d",
                     record.product_id,
                     result['num_variations'],
                     best_score,
                     variation_idx,
+                    best_check_count,
                 )
                 return "passed"
             

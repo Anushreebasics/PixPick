@@ -1,13 +1,13 @@
 # AI Product Image Batch Pipeline (Local)
 
-Automates stylized product image generation at scale using deterministic PIL-based image transformations. Generates **8 variations per product**, compares them to the source image, and selects the best match.
+Automates stylized product image generation at scale using deterministic PIL-based image transformations. Generates **8 variations per product**, scores them with perceptual quality checks, and selects the strongest candidate.
 
 ## What It Solves
 
 - Processes large catalogs (`~5,000` products) with structured batch processing
 - **No API keys required** — fully local, offline operation
 - Generates **8 image variations** per product with category-specific styling
-- Selects **best match** using image similarity (MSE metric)
+- Selects the **best variation** using perceptual quality scoring and QA check counts
 - Category-aware prompts ensure consistency (electronics, clothing, home, etc.)
 - Routes outputs to `data/output/<category>/<product_id>/`
 - Tracks all variation scores in metadata JSON
@@ -15,11 +15,11 @@ Automates stylized product image generation at scale using deterministic PIL-bas
 ## Pipeline Flow
 
 1. Read product records from `data/manifest.csv`
-2. Build category-aware prompts from `config/prompts.yaml`
+2. Build category-aware prompts from `templates/prompts.yaml`
 3. **Generate 8 stylized image variations** (different strength/seed combinations)
-4. Compare each variation to source image (MSE similarity metric)
-5. **Select best match** (highest similarity score)
-6. Validate: score > threshold (default 0.75)
+4. Score each variation with perceptual quality metrics such as sharpness, contrast, and exposure balance
+5. **Select best variation** by the most QA checks passed, then the highest quality score
+6. Validate: score > threshold and enough QA checks pass
 7. If pass: save to `data/output/<category>/<product_id>/<style>.png` + metadata
 8. If fail: route to manual review
 
@@ -53,7 +53,7 @@ Optional:
 
 ```bash
 # Full run with all products in manifest
-python main.py --settings config/settings.yaml --prompts config/prompts.yaml
+python main.py --settings config/settings.yaml --prompts templates/prompts.yaml
 
 # Test with first 5 products
 python main.py --limit 5 --log-level INFO
@@ -83,13 +83,15 @@ For each product:
    - **Home**: inviting warmth, luxury aesthetic, mood lighting
    - **Generic**: balanced enhancements
 
-3. **Compare to source** using MSE (Mean Squared Error):
-   - Lower MSE = higher similarity
-   - Converted to 0.0-1.0 score: `similarity = 1 - (mse / max_mse)`
+3. **Score each variation** with a perceptual quality heuristic:
+  - Sharpness from Laplacian variance
+  - Contrast from pixel spread
+  - Dynamic range and exposure balance
+  - Variations are ranked by QA checks passed, then by overall quality score
 
-4. **Select best match**:
-   - Example scores: `[0.996, 0.996, 0.995, 0.995, 0.995, 0.994, 0.994, 0.993]`
-   - Pick variation with highest score
+4. **Select best variation**:
+  - Example scores: `[0.82, 0.79, 0.85, 0.76, 0.78, 0.81, 0.80, 0.77]`
+  - Pick the variation with the most QA checks passed, then the highest score
    - Save all scores in metadata for audit trail
 
 ## Output Structure
@@ -112,7 +114,7 @@ data/output/<category>/<product_id>/
   "validation": {
     "passed": true,
     "score": 0.9961894154548645,
-    "rationale": "Best match from 8 variations (index: 0)"
+    "rationale": "Best quality variation from 8 variations (index: 0, checks: sharpness, contrast, dynamic_range)"
   },
   "output_image": "data/output/electronics/SKU-1001/hero.png",
   "dimensions": {"width": 1200, "height": 1200},
@@ -137,7 +139,7 @@ Edit `config/settings.yaml` to customize:
 backend: local                    # Always local (no API calls)
 max_retries: 3                    # Unused (local has multi-variation instead)
 worker_count: 6                   # Parallel workers (CPU threads)
-validation_score_threshold: 0.75  # Min similarity to pass
+validation_score_threshold: 0.75  # Min perceptual quality score to pass
 output_root: data/output
 manual_review_root: data/manual_review
 ```
@@ -167,7 +169,7 @@ BatchPipeline (orchestration)
   │   ├─→ _stylize_electronics()
   │   ├─→ _stylize_clothing()
   │   ├─→ _stylize_home()
-  │   └─→ _compute_image_similarity() [MSE]
+  │   └─→ quality.py (perceptual quality scoring)
   ├─→ qa.py (validate scores)
   └─→ storage.py (save outputs)
 ```
@@ -179,7 +181,7 @@ pyproject/
 ├── main.py                    # CLI entry
 ├── config/
 │   ├── settings.yaml          # Pipeline config
-├── config/
+├── templates/
 │   └── prompts.yaml           # Category prompts
 ├── data/
 │   ├── manifest.csv           # Product metadata
@@ -202,7 +204,7 @@ pyproject/
 
 - **pillow** — Image processing (crop, resize, enhance)
 - **pyyaml** — Config/prompt loading
-- **numpy** — Histogram/MSE computation
+- **numpy** — Perceptual quality metrics and image statistics
 - **python-dotenv** — Environment variables (optional, for future extensions)
 
 Install all:

@@ -5,11 +5,11 @@ import logging
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import requests
 from PIL import Image
 
 from .local_backend import LocalImageBackend
+from .quality import assess_image_quality
 
 
 class GeminiImageBackend:
@@ -55,10 +55,10 @@ class GeminiImageBackend:
         source_mime_type: Optional[str] = None,
         strength: float = 0.7,
     ) -> Dict[str, Any]:
-        source_image = Image.open(BytesIO(source_image_bytes)).convert("RGB")
-
         variations: List[bytes] = []
         scores: List[float] = []
+        check_counts: List[int] = []
+        passed_checks: List[List[str]] = []
 
         for i in range(num_variations):
             variation_prompt = (
@@ -75,10 +75,12 @@ class GeminiImageBackend:
             )
 
             generated_image = Image.open(BytesIO(generated_bytes)).convert("RGB")
-            similarity_score = self._compute_image_similarity(source_image, generated_image)
+            quality_assessment = assess_image_quality(generated_image)
 
             variations.append(generated_bytes)
-            scores.append(similarity_score)
+            scores.append(quality_assessment["score"])
+            check_counts.append(quality_assessment["check_count"])
+            passed_checks.append(quality_assessment["passed_checks"])
 
         if not variations:
             return self.local_fallback.generate_multiple_images(
@@ -89,13 +91,15 @@ class GeminiImageBackend:
                 strength=strength,
             )
 
-        best_idx = scores.index(max(scores))
+        best_idx = max(range(len(variations)), key=lambda idx: (check_counts[idx], scores[idx]))
         return {
             "best_image_bytes": variations[best_idx],
             "best_score": scores[best_idx],
             "variation_index": best_idx,
             "num_variations": num_variations,
             "scores": scores,
+            "check_counts": check_counts,
+            "passed_checks": passed_checks,
         }
 
     def validate_semantic_match(
@@ -154,14 +158,3 @@ class GeminiImageBackend:
 
         raise RuntimeError("Gemini response did not contain image data")
 
-    def _compute_image_similarity(self, img1: Image.Image, img2: Image.Image) -> float:
-        if img1.size != img2.size:
-            img2 = img2.resize(img1.size, Image.Resampling.LANCZOS)
-
-        arr1 = np.array(img1, dtype=np.float32)
-        arr2 = np.array(img2, dtype=np.float32)
-
-        mse = np.mean((arr1 - arr2) ** 2)
-        max_mse = 255.0 ** 2
-        similarity = max(0.0, 1.0 - (mse / max_mse))
-        return float(similarity)
