@@ -97,7 +97,6 @@ class LocalImageBackend:
             'scores': scores,
             'check_counts': check_counts,
             'passed_checks': passed_checks,
-            'variations': variations,
         }
 
     def validate_semantic_match(
@@ -133,47 +132,6 @@ class LocalImageBackend:
                 "corrective_constraints": [],
                 "rationale": "Failed to compare images",
             }
-
-    def compare_images(self, source_image_bytes: bytes, image_a_bytes: bytes, image_b_bytes: bytes, prompt: str) -> Dict[str, Any]:
-        """Compare two generated images and pick the better one using perceptual heuristics.
-
-        Returns a dict with keys: winner_index (0 or 1), passed (bool), rationale (str), scores (list)
-        """
-        try:
-            from io import BytesIO
-
-            a_img = Image.open(BytesIO(image_a_bytes)).convert("RGB")
-            b_img = Image.open(BytesIO(image_b_bytes)).convert("RGB")
-
-            a_assess = assess_image_quality(a_img)
-            b_assess = assess_image_quality(b_img)
-
-            # Prefer higher check_count then higher score
-            a_key = (a_assess["check_count"], a_assess["score"])
-            b_key = (b_assess["check_count"], b_assess["score"])
-
-            if a_key == b_key:
-                # tie-breaker: choose higher score
-                winner = 0 if a_assess["score"] >= b_assess["score"] else 1
-            else:
-                winner = 0 if a_key > b_key else 1
-
-            rationale = (
-                f"Local comparison chosen winner={winner}; "
-                f"A(score={a_assess['score']:.3f},checks={a_assess['check_count']}); "
-                f"B(score={b_assess['score']:.3f},checks={b_assess['check_count']})"
-            )
-
-            passed = max(a_assess["score"], b_assess["score"]) > 0.75 and max(a_assess["check_count"], b_assess["check_count"]) >= 3
-
-            return {
-                "winner_index": int(winner),
-                "passed": bool(passed),
-                "rationale": rationale,
-                "scores": [a_assess["score"], b_assess["score"]],
-            }
-        except Exception:
-            return {"winner_index": 0, "passed": False, "rationale": "local_compare_failed", "scores": [0.0, 0.0]}
 
     def _load_diffusion_pipeline(self):
         if self._pipeline is not None:
