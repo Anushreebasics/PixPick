@@ -7,10 +7,10 @@
   "attempt": 1,
   "validation": {
     "passed": true,
-    "score": 0.7923873080034576,
+    "score": 0.7826107210942306,
     "failure_types": [],
     "corrective_constraints": [],
-    "rationale": "Best quality variation from 8 variations (index: 1, checks: sharpness, contrast, dynamic_range, exposure)"
+    "rationale": "Best quality variation from 8 variations (index: 1)"
   },
   "output_image": "data/output/clothing/SKU-2001/hero.png",
   "dimensions": {
@@ -20,23 +20,23 @@
   "variations_count": 8,
   "best_variation_index": 1,
   "all_scores": [
-    0.792365707717088,
-    0.7923873080034576,
-    0.7923773911154041,
-    0.7923260366785494,
-    0.792329350830312,
-    0.792346947548906,
-    0.7923494444305362,
-    0.7922172933904256
+    0.7826003510831939,
+    0.7826107210942306,
+    0.7825890637934715,
+    0.7825194000185981,
+    0.782509723800207,
+    0.782516141015434,
+    0.782509407070106,
+    0.7823717823285198
   ],
   "all_check_counts": [
-    4,
-    4,
-    4,
-    4,
-    4,
-    4,
-    4,
-    4
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5
   ]
 }

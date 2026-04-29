@@ -12,6 +12,7 @@ from .prompting import PromptBuilder
 from .qa import parse_validation
 from .storage import detect_mime_type, image_dimensions, save_image, write_json
 from .types import GenerationAttempt, ProductRecord
+from .local_backend import LocalImageBackend
 
 
 class BatchPipeline:
@@ -19,6 +20,8 @@ class BatchPipeline:
         self.settings = settings
         self.prompt_builder = PromptBuilder(prompt_config)
         self.client = gemini_client
+        # Always have a local backend to generate variations locally.
+        self.local_client = LocalImageBackend(model_name=self.settings.local_model_name, seed=self.settings.local_seed)
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def run(self, limit: Optional[int] = None) -> Dict[str, int]:
@@ -59,29 +62,75 @@ class BatchPipeline:
 
         # Generate multiple variations and pick the best
         try:
-            result = self.client.generate_multiple_images(
+            # Stage 1: generate 8 local variations and collect their scores
+            local_result = self.local_client.generate_multiple_images(
                 source_image_bytes=source_bytes,
                 prompt=base_prompt,
                 num_variations=8,
                 source_mime_type=source_mime,
             )
-            
-            generated_bytes = result['best_image_bytes']
-            best_score = result['best_score']
-            variation_idx = result['variation_index']
-            best_check_count = result.get('check_counts', [0])[variation_idx]
-            best_passed_checks = result.get('passed_checks', [[]])[variation_idx]
-            
-            raw_validation = {
-                "passed": best_score > 0.75 and best_check_count >= 3,
-                "score": best_score,
-                "failure_types": [],
-                "corrective_constraints": [],
-                "rationale": (
-                    f"Best quality variation from {result['num_variations']} variations "
-                    f"(index: {variation_idx}, checks: {', '.join(best_passed_checks) if best_passed_checks else 'none'})"
-                ),
-            }
+
+            # Pick top-2 candidates by (check_count, score)
+            indices = list(range(len(local_result.get('scores', []))))
+            indices.sort(key=lambda i: (local_result.get('check_counts', [0])[i], local_result.get('scores', [0])[i]), reverse=True)
+            top2 = indices[:2] if indices else [0]
+
+            # Stage 2: ask Gemini (or gemini_client) to compare the top-2 variations and act as QA
+            chosen_idx = local_result.get('variation_index', 0)
+            chosen_bytes = local_result.get('best_image_bytes')
+            try:
+                if len(top2) >= 2:
+                    a_idx, b_idx = top2[0], top2[1]
+                    a_bytes = local_result.get('variations', [None])[a_idx]
+                    b_bytes = local_result.get('variations', [None])[b_idx]
+                    compare = self.client.compare_images(source_bytes, a_bytes, b_bytes, base_prompt)
+                    # choose winner based on Gemini/local verdict
+                    winner = int(compare.get('winner_index', 0))
+                    winner_global_idx = [a_idx, b_idx][winner]
+                    chosen_idx = winner_global_idx
+                    chosen_bytes = local_result.get('variations', [None])[chosen_idx]
+                    # Use Gemini's passed verdict if available, else fallback to local
+                    raw_validation = {
+                        'passed': bool(compare.get('passed', False)),
+                        'score': 0.0,
+                        'failure_types': [],
+                        'corrective_constraints': [],
+                        'rationale': compare.get('rationale', 'gemini_comparison'),
+                    }
+                else:
+                    # Fallback to local-best
+                    chosen_bytes = local_result.get('best_image_bytes')
+                    chosen_idx = local_result.get('variation_index', 0)
+                    raw_validation = {
+                        'passed': local_result.get('best_score', 0.0) > 0.75 and (local_result.get('check_counts', [0])[chosen_idx] >= 3),
+                        'score': local_result.get('best_score', 0.0),
+                        'failure_types': [],
+                        'corrective_constraints': [],
+                        'rationale': (
+                            f"Best quality variation from {local_result.get('num_variations', 8)} variations "
+                            f"(index: {chosen_idx})"
+                        ),
+                    }
+            except Exception as exc:
+                self.logger.warning("Comparison via client failed, falling back to local pick: %s", exc)
+                chosen_bytes = local_result.get('best_image_bytes')
+                chosen_idx = local_result.get('variation_index', 0)
+                raw_validation = {
+                    'passed': local_result.get('best_score', 0.0) > 0.75 and (local_result.get('check_counts', [0])[chosen_idx] >= 3),
+                    'score': local_result.get('best_score', 0.0),
+                    'failure_types': [],
+                    'corrective_constraints': [],
+                    'rationale': (
+                        f"Best quality variation from {local_result.get('num_variations', 8)} variations "
+                        f"(index: {chosen_idx})"
+                    ),
+                }
+
+            generated_bytes = chosen_bytes
+            best_score = local_result.get('scores', [0.0])[chosen_idx] if local_result.get('scores') else 0.0
+            variation_idx = chosen_idx
+            best_check_count = local_result.get('check_counts', [0])[variation_idx] if local_result.get('check_counts') else 0
+            best_passed_checks = local_result.get('passed_checks', [[]])[variation_idx] if local_result.get('passed_checks') else []
             
             validation = parse_validation(raw_validation, self.settings.validation_score_threshold)
             attempts.append(
@@ -95,15 +144,15 @@ class BatchPipeline:
             
             if validation.passed:
                 self._persist_success(record, attempts[-1], extra_metadata={
-                    'variations_count': result['num_variations'],
+                    'variations_count': local_result.get('num_variations', 8),
                     'best_variation_index': variation_idx,
-                    'all_scores': result['scores'],
-                    'all_check_counts': result.get('check_counts', []),
+                    'all_scores': local_result.get('scores', []),
+                    'all_check_counts': local_result.get('check_counts', []),
                 })
                 self.logger.info(
                     "PASS product=%s variations=%d quality_score=%.2f best_idx=%d checks=%d",
                     record.product_id,
-                    result['num_variations'],
+                    local_result.get('num_variations', 8),
                     best_score,
                     variation_idx,
                     best_check_count,
