@@ -232,9 +232,3 @@ python main.py --limit 10 --log-level DEBUG
 2026-04-29 15:06:02 | INFO | BatchPipeline | Pipeline finished: {'passed': 2, 'manual_review': 0, 'errors': 0}
 ```
 
-## Notes
-
-- **Deterministic**: Same input → same output (seeded randomness)
-- **Offline**: Works without internet or API keys
-- **Auditable**: All 8 variation scores saved for each product
-- **Extensible**: Easy to add new category-specific stylization rules
