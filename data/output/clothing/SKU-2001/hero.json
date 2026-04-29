@@ -1,0 +1,32 @@
+{
+  "product_id": "SKU-2001",
+  "category": "clothing",
+  "style": "hero",
+  "source_image": "data/input/jeans.jpg",
+  "status": "passed",
+  "attempt": 1,
+  "validation": {
+    "passed": true,
+    "score": 0.9820297956466675,
+    "failure_types": [],
+    "corrective_constraints": [],
+    "rationale": "Best match from 8 variations (index: 0)"
+  },
+  "output_image": "data/output/clothing/SKU-2001/hero.png",
+  "dimensions": {
+    "width": 1500,
+    "height": 1940
+  },
+  "variations_count": 8,
+  "best_variation_index": 0,
+  "all_scores": [
+    0.9820297956466675,
+    0.9818893074989319,
+    0.9817670583724976,
+    0.9816160202026367,
+    0.9814670085906982,
+    0.9813141822814941,
+    0.9811972975730896,
+    0.980844259262085
+  ]
+}

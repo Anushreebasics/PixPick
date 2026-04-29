@@ -1,0 +1,37 @@
+backend: local
+
+input_root: data/input
+manifest_path: data/manifest.csv
+output_root: data/output
+manual_review_root: data/manual_review
+
+max_retries: 3
+worker_count: 6
+request_timeout_seconds: 120
+retry_backoff_seconds: 2
+
+models:
+  generation_model: gemini-2.5-flash-image
+  validation_model: gemini-2.5-flash
+
+replicate:
+  model_ref: google/gemini-2.5-flash-image
+  strength: 0.7
+  num_inference_steps: 24
+  guidance_scale: 3.5
+
+local:
+  model_name: runwayml/stable-diffusion-v1-5
+  seed: 42
+
+generation:
+  temperature: 0.4
+  candidate_count: 1
+  output_mime_type: image/png
+
+validation:
+  score_threshold: 0.78
+  required_checks:
+    - product_identity_preserved
+    - major_structure_preserved
+    - visual_style_consistency

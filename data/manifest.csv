@@ -1,0 +1,3 @@
+product_id,category,image_path,style,product_title
+SKU-1001,electronics,data/input/earbuds.jpg,hero,Wireless Earbuds Black
+SKU-2001,clothing,data/input/jeans.jpg,hero,Classic Denim Jeans
